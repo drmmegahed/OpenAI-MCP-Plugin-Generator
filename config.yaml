@@ -1,0 +1,119 @@
+# mcp-plugin-gen configuration
+#
+# Everything the run needs is in this file. Fill the `credentials:` block below; run.sh exports each
+# key as an UPPERCASE env var so the ${...} references further down resolve. Credentials are used at
+# runtime only and never enter the generated package (the validator fails the build if one leaks).
+# Keep this file out of git (config.yaml is git-ignored); env vars / .env still work as a fallback.
+
+credentials:
+  oauth_client_secret: ""         # → OAUTH_CLIENT_SECRET  (client secret)
+  oauth_token: ""                 # → OAUTH_TOKEN          (only for oauth.mode: token)
+  api_key: ""                     # → API_KEY              (only for oauth.mode: api_key with bearer/custom_header)
+  sso_mobile: ""                  # → SSO_MOBILE           (e.g. +9665XXXXXXXX)
+  sso_id: ""                      # → SSO_ID               (national ID / Iqama)
+  sso_otp: ""                     # → SSO_OTP              (test OTP, if the SSO has a fixed test code)
+
+mcp:
+  url: ""
+  transport: streamable-http
+  timeout: 30
+  verify_tls: true
+
+oauth:
+  mode: auth_code                 # auth_code | client_creds | token | api_key | none
+                                  # api_key = NO OAuth redirect: ChatGPT sends a credential entered at connection setup in a header
+                                  #   (api_key_header_scheme basic → Authorization: Basic base64(client_id:client_secret)).
+                                  #   Personal/desktop installs only (portal connection form rejects it); the MCP server must verify it.
+  client_id: ""         # mcp.json auth.client.clientId; must be a PUBLIC client (PKCE) for desktop/personal installs
+  client_secret: ${OAUTH_CLIENT_SECRET}
+  issuer: ""                      # leave empty to auto-discover via .well-known / 401 hint
+  scopes: [openid, email, profile, mcp:read, mcp:write]
+  redirect_uri: http://127.0.0.1:8765/callback   # must be a registered redirect URI of the client in Keycloak.
+                                                 # With sso.enabled the code is captured inside the browser, so any
+                                                 # registered URI works (even a non-routable host).
+  callback_bind: ""                              # listener host override (auto); only matters with sso.enabled: false
+  token_endpoint_auth_method: client_secret_basic   # mcp.json auth: none | client_secret_basic | client_secret_post | private_key_jwt
+  client_mode: provided                          # mcp.json auth: provided | dcr | cimd
+  oidc_enabled: true                             # mcp.json auth.oidcEnabled; false = plain OAuth (no oidc* fields / UserInfo)
+  exact_scopes: false                            # true → OpenAI requests exactly `scopes` minus openid (baseScopes + defaultScopes: [])
+  declare_in_mcp_json: auto                      # auto → builder target: NO auth block (Plugin-Builder layout). ChatGPT discovers OAuth
+                                                 #        from the server and uses its own CIMD client; SSO opens at install (web+desktop).
+                                                 # true → declares client_id (mode provided). VERIFIED: on personal/desktop installs
+                                                 #        ChatGPT drops the MCP server for such packages — only for portal-connected plugins.
+  token: ${OAUTH_TOKEN:-}         # used when mode=token
+  api_key_header_scheme: basic    # mode=api_key: basic | bearer | custom_header
+  api_key_header_name: ""         # mode=api_key + custom_header, e.g. X-API-Key
+  api_key: ${API_KEY:-}           # mode=api_key with bearer/custom_header
+
+sso:
+  enabled: true                   # headless auto-login through the SSO form; false → URL is opened for manual login
+  headless: true
+  browser: chromium
+  step_timeout_ms: 30000
+  screenshot_dir: ./dist/sso-debug
+  # it lists every input/button on that page with its attributes — copy the right id/name into the selector.
+  # A missing submit button is not fatal: generic Keycloak/Arabic buttons are tried, then Enter is pressed.
+  steps:
+    - name: mobile
+      wait_for: "input[name='mobile'], #mobile"
+      fill: "input[name='mobile'], #mobile"
+      value: ${SSO_MOBILE}
+    - name: id-document
+      fill: "input[name='nationalId'], #nationalId, input[name='idNumber']"
+      value: ${SSO_ID}
+      submit: "#kc-login, input[type='submit'], button[type='submit']"
+    - name: otp
+      wait_for: "input[name='otp'], #otp, input[autocomplete='one-time-code']"
+      type: "input[name='otp'], #otp, input[autocomplete='one-time-code']"
+      value: ${SSO_OTP}
+      submit: "#kc-login, input[type='submit'], button[type='submit']"
+    - name: consent            # OAuth consent screen, if Keycloak shows one
+      optional: true
+      wait_ms: 1500
+      click: "button:has-text('Yes'), button:has-text('Allow'), button:has-text('Authorize'), #kc-login"
+
+listing:
+  name: ""
+  display_name: ""
+  developer_name: ""
+  author_url: ""
+  homepage: ""
+  website_url: ""    # → interface.websiteURL (required)
+  version: 1.0.0
+  description: ""
+  short_description: ""      # portal subtitle: max 30 characters
+  long_description: ""
+  category: ""
+  capabilities: []                # derived from tool annotations when empty
+  default_prompt: ""                 # string or list (builder target emits a list)
+  release_notes: Initial release.   # extensions.com.openai.publication.release_notes
+  keywords: []
+  license: Proprietary
+  privacy_policy_url: ""
+  terms_of_service_url: ""
+  support_url: ""
+  support_email: ""
+  language_note: ""
+  domain_notes: ""
+  icon_text: ""
+  brand_color: "#211AFB"          # the mark's blue
+  accent_color: "#C9A24D"
+
+assets:
+  icon: ""                        # empty → bundled brand/logo.png (the hexagon mark); or a path to your own file
+  logo: ""                        # empty → bundled brand/logo-1024.png
+  screenshots: []
+
+output:
+  dir: ./dist
+  zip: true
+  include_scripts: true
+  emit_codex_compat: true
+  emit_mcp_json: true
+  target: builder                 # builder (default) → Plugin-Builder layout for the developer portal | portal → extended layout | workspace → Admin Console (.app.json)
+review:
+  demo_recording_url: ""          # REQUIRED for MCP review: https link to a screen recording of the plugin in ChatGPT
+  commerce: false
+  commerce_description: This plugin does not sell products or process payments.
+  positive: []                    # auto-generated from discovered tools (5) unless provided: {description, prompt, tools_triggered, expected_behavior}
+  negative: []                    # auto-generated (3) unless provided: {description, prompt, expected_behavior}
